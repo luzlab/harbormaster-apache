@@ -1,25 +1,42 @@
 import { Template } from 'meteor/templating';
-import { Lanes } from '../../../api/lanes/lanes.js';
-import { Users } from '../../../api/users/users.js';
+import { Lanes } from '../../../api/lanes';
+import { Users } from '../../../api/users';
+import { Shipments } from '../../../api/shipments';
 
-const sort_by_length = function (doc1, doc2, key, reverse) {
-  let length1 = doc1[key] ? doc1[key].length : 0;
-  let length2 = doc2[key] ? doc2[key].length : 0;
-  let order = 0;
+Template.lanes.onRendered(() => {
+  let options = {
+    sort: { actual: -1 },
+    limit: 1,
+  };
 
-  if (length1 > length2) { order = -1; }
-  else if (length1 < length2) { order = 1; }
+  Meteor.call('Lanes#get_total', (err, res) => {
+    if (err) throw err;
 
-  if (reverse == -1) { order = -order; }
-  return order;
-}
+    Session.set('total_lanes', res);
+  });
+
+  Lanes.find().forEach((lane) => {
+    Meteor.subscribe('Shipments', lane, options);
+    Meteor.subscribe('Shipments#check_state', lane);
+  });
+});
 
 Template.lanes.helpers({
+  loading_lanes () {
+    let total = Session.get('total_lanes');
+    let current = Lanes.find().count();
+
+    if (! total || current < total) return true;
+
+    return false;
+  },
+
   lanes () {
     let lanes;
     let sort_by = Session.get('lanes_table_sort_by');
     let reverse = Session.get('lanes_table_sort_reverse') ? -1 : 1;
 
+    //TODO: modularize
     switch (sort_by) {
       case 'name':
         lanes = Lanes.find({}, { sort: { name: reverse } });
@@ -27,49 +44,21 @@ Template.lanes.helpers({
       case 'captains':
         lanes = Lanes.find({}, { sort: { captains: -reverse } });
         break;
-      case 'destinations':
-        lanes = Lanes.find({}, {
-          sort: function (lane1, lane2) {
-            return sort_by_length(lane1, lane2, 'destinations', reverse);
-          }
-        })
-        break;
-      case 'stops':
-        lanes = Lanes.find({}, {
-          sort: function (lane1, lane2) {
-            let total_lane1_stops = 0;
-            let total_lane2_stops = 0;
-            let sort_order = 0;
-
-            _.each(lane1.destinations, function (destination) {
-              total_lane1_stops += destination.stops.length;
-            });
-
-            _.each(lane2.destinations, function (destination) {
-              total_lane2_stops += destination.stops.length;
-            });
-
-            if (total_lane1_stops > total_lane2_stops) {
-              sort_order = -1;
-            } else if (total_lane1_stops < total_lane2_stops) {
-              sort_order = 1;
-            }
-
-            if (reverse == -1) { sort_order = -sort_order; }
-
-            return sort_order;
-          }
-        });
+      case 'type':
+        lanes = Lanes.find({}, { sort: { type: reverse } });
         break;
       case 'shipped':
         lanes = Lanes.find({}, {
           sort: function (lane1, lane2) {
-            let lane1_date = lane1.date_history ? 
-              lane1.date_history[lane1.date_history.length - 1].actual :
+            let lane1_shipments = Shipments.find({ lane: lane1._id }).fetch();
+            let lane2_shipments = Shipments.find({ lane: lane2._id }).fetch();
+
+            let lane1_date = lane1_shipments.length ? 
+              lane1_shipments[lane1_shipments.length - 1].actual :
               0
             ;
-            let lane2_date = lane2.date_history ?
-              lane2.date_history[lane2.date_history.length - 1].actual :
+            let lane2_date = lane2_shipments.length ?
+              lane2_shipments[lane2_shipments.length - 1].actual :
               0
             ;
             let sort_order = 0;
@@ -80,18 +69,51 @@ Template.lanes.helpers({
             if (reverse == -1) { sort_order = -sort_order; }
             return sort_order;
           }
-        })
-        break;
-      case 'salvaged':
+        });
         break;
       case 'shipments':
         lanes = Lanes.find({}, {
           sort: function (lane1, lane2) {
-            return sort_by_length(lane1, lane2, 'date_history', reverse);
+            let lane1_shipments = Shipments.find({ lane: lane1._id }).fetch();
+            let lane2_shipments = Shipments.find({ lane: lane2._id }).fetch();
+            let sort_order = 0;
+
+            if (lane1_shipments.length > lane2_shipments.length) {
+              sort_order = -1;
+            }
+            else if (lane1_shipments.length < lane2_shipments.length) {
+             sort_order = 1;
+            }
+
+            if (reverse == -1) { sort_order = -sort_order; }
+            return sort_order;
           }
         });
         break;
       case 'salvage-runs':
+        lanes = Lanes.find({}, {
+          sort: function (lane1, lane2) {
+            let lane1_shipments = Shipments.find({
+              lane: lane1._id,
+              exit_code: { $ne: 0 }
+            }).fetch();
+            let lane2_shipments = Shipments.find({
+              lane: lane2._id,
+              exit_code: { $ne: 0 }
+            }).fetch();
+            let sort_order = 0;
+
+            if (lane1_shipments.length > lane2_shipments.length) {
+              sort_order = -1;
+            }
+            else if (lane1_shipments.length < lane2_shipments.length) {
+             sort_order = 1;
+            }
+
+            if (reverse == -1) { sort_order = -sort_order; }
+            return sort_order;
+          }
+        });
         break;
       default:
         lanes = Lanes.find();
@@ -133,39 +155,49 @@ Template.lanes.helpers({
     return stops;
   },
 
-  last_shipped () {
-    var last_shipped_parsed;
-    var last_shipped_date;
+  latest_shipment () {
+    let shipment = Shipments.findOne({ lane: this._id });
 
-    if (! this.latest_shipment) { return 'never'; }
-    last_shipped_parsed = this.latest_shipment.split('-');
-    last_shipped_date = new Date(
-      last_shipped_parsed[0],
-      last_shipped_parsed[1],
-      last_shipped_parsed[2],
-      last_shipped_parsed[3],
-      last_shipped_parsed[4],
-      last_shipped_parsed[5]
-    );
-    return last_shipped_date.toLocaleString();
+    return shipment && shipment.start;
   },
 
-  last_salvage_run () {
-    if (! this.latest_salvage_run) { return 'never'; }
+  last_shipped () {
+    if (! this.shipments || ! this.shipments.length) return 'Never';
 
-    return new Date(this.latest_salvage_run).toLocaleString();
+    let shipment = Shipments.findOne({ lane: this._id });
+
+    if (this.shipments.length && ! shipment) return 'Loading...';
+
+    return (shipment && shipment.actual.toLocaleString()) || 'N/A';
+  },
+
+  last_salvaged () {
+    let salvage_runs = Shipments.find({
+      lane: this._id,
+      exit_code: { $ne: 0 }
+    }).fetch();
+    if (! salvage_runs.length) return 'never';
+
+    let last_salvage_run = salvage_runs[salvage_runs.length - 1];
+
+    return last_salvage_run.finished ?
+      last_salvage_run.finished.toLocaleString() :
+      'N/A'
+    ;
   },
 
   total_shipments () {
-    if (! this.date_history) { return 0; }
-
-    return this.date_history.length;
+    return this.shipments && this.shipments.length ?
+      this.shipments.length :
+      0
+    ;
   },
 
-  salvage_plans () {
-    if (! this.salvage_plans) { return 0; }
-
-    return this.salvage_plans.length;
+  total_salvage_runs () {
+    return Shipments.find({
+      lane: this._id,
+      exit_code: { $ne: 0 }
+    }).fetch().length;
   },
 
   can_ply () {
@@ -183,5 +215,38 @@ Template.lanes.helpers({
     }
 
     return false;
+  },
+
+  current_state () {
+    let active_shipments = Shipments.find({
+      lane: this._id,
+      active: true,
+    }).count();
+
+    if (active_shipments) return `${active_shipments} active`;
+
+    let latest_shipment = Shipments.findOne({
+      lane: this._id,
+    }, {
+      sort: { actual: -1 },
+    });
+
+    if (! latest_shipment) return 'N/A';
+
+    if (latest_shipment.exit_code) return 'error';
+
+    if (latest_shipment.exit_code == 0) return 'ready';
+  },
+
+  followup_name () {
+    let followup = Lanes.findOne(this.followup);
+
+    return followup ? followup.name : '';
+  },
+
+  salvage_plan_name () {
+    let salvage_plan = Lanes.findOne(this.salvage_plan);
+
+    return salvage_plan ? salvage_plan.name : '';
   }
 });

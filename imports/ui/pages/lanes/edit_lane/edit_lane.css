@@ -1,3 +1,8 @@
+li {
+  list-style-type: circle;
+  margin: 5px;
+}
+
 .destination[data-destination-index="0"] .remove-destination {
   display: none;
 }
@@ -37,4 +42,16 @@
 
 .stop[data-stop-index="0"] .remove-stop {
   display: none;
+}
+
+fieldset.followup {
+  background: #0af;
+}
+
+fieldset.followup label {
+  color: white;
+}
+
+fieldset.salvage-plan {
+  background: #ffae00;
 }

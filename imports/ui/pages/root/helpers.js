@@ -1,73 +1,45 @@
 import { Template } from 'meteor/templating';
-import { Lanes } from '../../../api/lanes/lanes';
-import { Users } from '../../../api/users/users';
+import { Lanes } from '../../../api/lanes';
+import { Users } from '../../../api/users';
+import { Shipments } from '../../../api/shipments';
 
 Template.root.helpers({
   latest_shipment: function () {
-    var lanes = Lanes.find().fetch().sort(
-      function (lane1, lane2) {
+    let latest_shipment = Session.get('latest_shipment') || false;
 
-        let latest_lane1_shipment = lane1.date_history ?
-          lane1.date_history[lane1.date_history.length - 1] :
-          0;
-        let latest_lane2_shipment = lane2.date_history ?
-          lane2.date_history[lane2.date_history.length - 1] :
-          0;
+    Meteor.call('Shipments#get_latest_date', function (err, res) {
+      if (err) throw err;
 
-        if (latest_lane1_shipment > latest_lane2_shipment) return -1;
-        else if (latest_lane1_shipment < latest_lane2_shipment) return 1;
-        return 0;
-      }
-    );
+      Session.set('latest_shipment', res);
+    });
 
-    let latest_lane = lanes[lanes.length - 1];
+    if (! latest_shipment) return { locale: 'loading...' };
 
-    if (latest_lane && latest_lane.date_history.length) {
-      return {
-        name: latest_lane.name,
-        date: latest_lane.latest_shipment,
-        locale: latest_lane
-          .date_history[latest_lane.date_history.length - 1]
-          .actual
-          .toLocaleString()
-      };
-    }
-
-    return {
-      name: latest_lane ? latest_lane.name : '',
-      date: '',
-      locale: 'Never'
-    };
+    return Session.get('latest_shipment');
   },
 
   shipments_last_24_hours: function () {
-    var yesterday = new Date(Date.now() - 86400000);
-    var lanes = Lanes.find({
-      date_history: {
-        $elemMatch: {
-          actual: {
-            $gte: yesterday
-          }
-        }
-      }
-    }).fetch();
-    var shipments_made = 0;
+    let total = Session.get('total_shipments') || 0;
 
-    _.each(lanes, function (lane) {
-      _.each(lane.date_history, function (date) {
-        if (date.actual >= yesterday) { shipments_made++; }
+    if (! total) {
+      Meteor.call('Shipments#get_total', (err, res) => {
+        if (err) throw err;
+
+        Session.set('total_shipments', res);
       });
-    });
 
-    return shipments_made;
+      return 'Loading';
+    }
+
+    return total;
   },
 
   total_lanes: function () {
-    return Lanes.find().fetch().length;
+    return Lanes.find().count();
   },
 
   total_users: function () {
-    return Users.find().fetch().length;
+    return Users.find().count();
   },
 
   total_captains: function () {
@@ -88,6 +60,7 @@ Template.root.helpers({
   },
 
   total_destinations: function () {
+    return []
     var total_destinations = 0;
     var lanes = Lanes.find().fetch();
 

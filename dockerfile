@@ -1,21 +1,17 @@
-FROM node:4.6
-MAINTAINER Skyler Brungardt <skyler@trueandco.com>
+FROM strictlyskyler/meteor-environment:1.1.0
+MAINTAINER Skyler Brungardt <skyler.brungardt@gmail.com>
 
 ADD . /opt/harbormaster
 
 WORKDIR /opt/harbormaster
 
-RUN curl https://install.meteor.com/ | sh \
- && mkdir /harbormaster \
- && meteor --allow-superuser build /harbormaster --directory \
- && cd /harbormaster/bundle/programs/server \
- && npm install
+RUN mkdir /harbormaster
+RUN meteor --allow-superuser build /harbormaster --directory
+RUN ln -s /opt/harbormaster/start.sh /start.sh
 
-ADD start.sh /start.sh
-
-EXPOSE 80
+WORKDIR /harbormaster/bundle/programs/server
+RUN rm npm-shrinkwrap.json
+RUN npm install
 
 VOLUME /root/.ssh
-
-ENTRYPOINT ["/start.sh"]
 

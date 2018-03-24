@@ -1,20 +1,22 @@
 import { Template } from 'meteor/templating';
-import { Users } from '../../../api/users/users';
+import { Users } from '../../../api/users';
 
 let users_subscription;
 let lanes_subscription;
+let harbors_subscription;
+let shipments_subscription;
 
 Template.main.onCreated(function () {
   users_subscription = Meteor.subscribe('Users');
   lanes_subscription = Meteor.subscribe('Lanes');
+  harbors_subscription = Meteor.subscribe('Harbors');
 });
 
 Template.main.helpers({
   is_loaded () {
     if (
-      ! Meteor.loggingIn() &&
-      users_subscription.ready() &&
-      lanes_subscription.ready()
+      ! Session.get('loading')
+      && ! Meteor.loggingIn()
     ) return true;
 
     return false;
